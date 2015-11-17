@@ -1,0 +1,146 @@
+#!/usr/bin/php
+<?php
+/**
+ * @file
+ * Jira commit message template generator.
+ *
+ * @version 0.1.0
+ *
+ * @author brunoric <brunoric@gmail.com>
+ */
+
+/**
+ * Hides terminal's text.
+ */
+function hide_term() {
+  if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+    system('stty -echo');
+  }
+}
+
+/**
+ * Restore terminal's text.
+ */
+function restore_term() {
+  if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+    system('stty echo');
+  }
+}
+
+/**
+ * Gets user input.
+ */
+function get_input($message, $hidden = FALSE) {
+  echo $message;
+  if ($hidden) {
+    hide_term();
+  }
+  $data = rtrim(fgets(STDIN), PHP_EOL);
+  if ($hidden) {
+    restore_term();
+  }
+
+  return $data;
+}
+
+/**
+ * Get user credentials.
+ */
+function get_credentials() {
+  $username = get_input('Enter your username: ');
+  $password = get_input('Enter your password: ', TRUE);
+
+  return array(
+    'username' => $username,
+    'password' => $password,
+  );
+}
+
+/**
+ * Get JSON data.
+ */
+function get_json($url, $auth = FALSE) {
+  $ch = curl_init();
+  curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+  curl_setopt($ch, CURLOPT_URL, $url);
+  curl_setopt($ch, CURLOPT_COOKIEJAR, '/tmp/jiratool.cookie');
+  curl_setopt($ch, CURLOPT_COOKIEFILE, '/tmp/jiratool.cookie');
+  if ($auth && !is_file('/tmp/jiratool.cookie')) {
+    $credentials = get_credentials();
+    curl_setopt($ch, CURLOPT_USERPWD, $credentials['username'] . ':' . $credentials['password']);
+  }
+  $result = curl_exec($ch);
+  curl_close($ch);
+
+  return $result;
+}
+
+/**
+ * Parse task summary.
+ */
+function parse_summary($json) {
+  $jira = json_decode($json, FALSE);
+
+  if (!empty($jira->fields->issuelinks[0]->inwardIssue)) {
+    return $jira->fields->issuelinks[0]->inwardIssue->fields->summary;
+  }
+
+  if (!empty($jira->fields->issuelinks[0]->outwardIssue)) {
+    return $jira->fields->issuelinks[0]->outwardIssue->fields->summary;
+  }
+
+  return 'Summary not found.';
+}
+
+/**
+ * Create commit file message template.
+ */
+function create_template($task_id, $task_summary) {
+  $task_id_length = strlen($task_id) + 3;
+  $task_summary_length = 72 - $task_id_length;
+  $task_summary_croppped = substr($task_summary, 0, $task_summary_length);
+
+  $content = "[$task_id] $task_summary_croppped\n";
+  $content .= "\n";
+  $content .= 'Work description.';
+
+  $filename = '/tmp/jiratool.template';
+
+  file_put_contents($filename, $content);
+
+  return $filename;
+}
+
+/**
+ * Initiate the script.
+ */
+function main($argv) {
+  $domain = getenv('JIRATOOL_JIRA_DOMAIN');
+  if (empty($domain)) {
+    echo 'You need to properly export the VARIABLE with the JIRA domain.' . PHP_EOL;
+    echo 'Example: "export JIRATOOL_JIRA_DOMAIN=https://yourjira.yourdomain.com".' . PHP_EOL;
+    exit(1);
+  }
+
+  if (empty($argv[1])) {
+    echo 'You need to pass a valid task ID as parameter.' . PHP_EOL;
+    echo 'Example: "git jiratool PREFIX-1234".' . PHP_EOL;
+    exit(1);
+  }
+
+  $task_id = $argv[1];
+  $task_prefix = getenv('JIRATOOL_JIRA_TASK_PREFIX');
+  if (!empty($task_prefix)) {
+    $task_id = $task_prefix . $task_id;
+  }
+
+  $url = $domain . '/rest/api/2/issue/' . $task_id;
+  $json = get_json($url, TRUE);
+  $task_summary = parse_summary($json);
+  $commit_file_template = create_template($task_id, $task_summary);
+  $output = system("git commit --template=$commit_file_template > `tty`");
+  unlink($commit_file_template);
+}
+
+main($argv);
