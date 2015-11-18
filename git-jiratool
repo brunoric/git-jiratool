@@ -4,7 +4,7 @@
  * @file
  * Jira commit message template generator.
  *
- * @version 0.1.0
+ * @version 0.1.1
  *
  * @author brunoric <brunoric@gmail.com>
  */
@@ -39,7 +39,6 @@ function get_input($message, $hidden = FALSE) {
   if ($hidden) {
     restore_term();
   }
-
   return $data;
 }
 
@@ -49,6 +48,7 @@ function get_input($message, $hidden = FALSE) {
 function get_credentials() {
   $username = get_input('Enter your username: ');
   $password = get_input('Enter your password: ', TRUE);
+  echo PHP_EOL;
 
   return array(
     'username' => $username,
@@ -57,23 +57,88 @@ function get_credentials() {
 }
 
 /**
- * Get JSON data.
+ * Make HTTP request.
  */
-function get_json($url, $auth = FALSE) {
+function request($url, $header = TRUE, $body = FALSE, $auth = FALSE, $cookies = TRUE) {
+  if (!$header && !$body) {
+    return array();
+  }
+
   $ch = curl_init();
   curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
   curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
   curl_setopt($ch, CURLOPT_URL, $url);
-  curl_setopt($ch, CURLOPT_COOKIEJAR, '/tmp/jiratool.cookie');
-  curl_setopt($ch, CURLOPT_COOKIEFILE, '/tmp/jiratool.cookie');
-  if ($auth && !is_file('/tmp/jiratool.cookie')) {
+  curl_setopt($ch, CURLOPT_HEADER, $header);
+  curl_setopt($ch, CURLOPT_NOBODY, !$body);
+  if ($auth) {
     $credentials = get_credentials();
     curl_setopt($ch, CURLOPT_USERPWD, $credentials['username'] . ':' . $credentials['password']);
   }
-  $result = curl_exec($ch);
+  if ($cookies) {
+    curl_setopt($ch, CURLOPT_COOKIEJAR, '/tmp/jiratool.cookie');
+    curl_setopt($ch, CURLOPT_COOKIEFILE, '/tmp/jiratool.cookie');
+  }
+  $response = curl_exec($ch);
   curl_close($ch);
 
-  return $result;
+  if ($header && $body) {
+    list($header, $body) = explode("\r\n\r\n", $response, 2);
+
+    return array(
+      'header' => $header,
+      'body' => $body,
+    );
+  }
+
+  if ($header) {
+    return array(
+      'header' => $response,
+    );
+  }
+
+  return array(
+    'body' => $response,
+  );
+}
+
+/**
+ * Verify if the JIRA is accessible.
+ */
+function handshake($url) {
+  $response = request($url);
+  return FALSE !== strpos($reponse['header'], '200 OK');
+}
+
+/**
+ * Authenticate user on JIRA.
+ */
+function authenticate($url) {
+  $response = request($url, TRUE, FALSE, TRUE);
+  return FALSE === strpos($response['header'], 'X-Seraph-LoginReason: AUTHENTICATED_FAILED');
+}
+
+/**
+ * Get JSON data.
+ */
+function get_json($url) {
+  if (handshake($url)) {
+    $response = request($url, FALSE, TRUE);
+    return $response['body'];
+  }
+
+  $attempts = 3;
+  while (!authenticate($url) && $attempts) {
+    echo 'Bad credentials. Please try again.' . PHP_EOL;
+    $attempts--;
+  }
+
+  if ($attempts) {
+    $response = request($url, FALSE, TRUE);
+    return $response['body'];
+  }
+
+  echo 'Login maximum attempts rechead. Bye!';
+  exit(1);
 }
 
 /**
@@ -113,9 +178,24 @@ function create_template($task_id, $task_summary) {
 }
 
 /**
+ * Grab cookies.
+ *
+ * @todo: This function is not being used. Use it to validate the cookie.
+ */
+function grab_cookies($response_header) {
+  preg_match_all('/^Set-Cookie:\s*([^;]*)/mi', $response_header, $matches);
+  $cookies = array();
+  foreach ($matches[1] as $item) {
+    parse_str($item, $cookie);
+    $cookies = array_merge($cookies, $cookie);
+  }
+  return $cookies;
+}
+
+/**
  * Initiate the script.
  */
-function main($argv) {
+function start($argv) {
   $domain = getenv('JIRATOOL_JIRA_DOMAIN');
   if (empty($domain)) {
     echo 'You need to properly export the VARIABLE with the JIRA domain.' . PHP_EOL;
@@ -143,4 +223,4 @@ function main($argv) {
   unlink($commit_file_template);
 }
 
-main($argv);
+start($argv);
