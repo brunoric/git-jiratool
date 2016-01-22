@@ -1,4 +1,4 @@
-#!/usr/bin/php
+#!/usr/bin/env php
 <?php
 /**
  * @file
@@ -106,7 +106,7 @@ function request($url, $header = TRUE, $body = FALSE, $auth = FALSE, $cookies = 
  */
 function handshake($url) {
   $response = request($url);
-  return FALSE !== strpos($reponse['header'], '200 OK');
+  return FALSE !== strpos($response['header'], '200 OK');
 }
 
 /**
