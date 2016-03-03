@@ -147,6 +147,16 @@ function get_json($url) {
 function parse_summary($json) {
   $jira = json_decode($json, FALSE);
 
+  /*
+    For some reason my summary was coming wrong.
+    Had to add this condition to fix.
+    Didn't have the time to check if the other two
+    still make sense.
+  */
+  if (!empty($jira->fields->summary)) {
+    return $jira->fields->summary;
+  }
+
   if (!empty($jira->fields->issuelinks[0]->inwardIssue)) {
     return $jira->fields->issuelinks[0]->inwardIssue->fields->summary;
   }
@@ -203,10 +213,27 @@ function start($argv) {
     exit(1);
   }
 
+  // Should we create a function for this condition?
   if (empty($argv[1])) {
     echo 'You need to pass a valid task ID as parameter.' . PHP_EOL;
     echo 'Example: "git jiratool PREFIX-1234".' . PHP_EOL;
     exit(1);
+  }
+
+  // Initial implementation for the JIRA's comment.
+  if ($argv[1] === 'pull') {
+    system('git log -1 > /tmp/git-comment-message');
+    $actual_branch = system('git rev-parse --abbrev-ref HEAD');
+    $last_commit = system('sed "2,20d" /tmp/git-comment-message');
+
+    $message = 'Done. Commited to {{' . $actual_branch. "}}.\n" . $last_commit;
+
+    // TODO: Add the message to the correct ticket
+    // URL to add comment: /rest/api/2/issue/{issueIdOrKey}/comment
+    // The message is coming in the following way:
+    //
+    // Done. Commited to {{feature/WCMSDRPL-8062}}.
+    // commit 2b25b9f5c661d560453e0e3ef363399f7fd56c94
   }
 
   $task_id = $argv[1];
